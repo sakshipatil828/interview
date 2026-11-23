@@ -1,0 +1,833 @@
+/**
+ * CareerCurve AI HR Personal Interview Module
+ * NLP Answer Evaluation Pipeline, STAR Behavioral Framework Analyzer,
+ * Communication Pacing & Filler Word Detector, and Adaptive Follow-Up Question Engine.
+ */
+
+import { 
+  HRDatasetQuestion, 
+  HREvaluationResult, 
+  STARAnalysis, 
+  CommunicationMetrics,
+  ResumeBasedFeedback,
+  HighlightedIssue
+} from './types';
+import { ParsedResume } from '../../types';
+
+// Common conversational filler words tracked for constructive coaching
+const FILLER_WORDS = [
+  'um', 'uh', 'er', 'ah',
+  'like', 'actually', 'basically',
+  'you know', 'sort of', 'kind of',
+  'literally', 'honestly', 'i mean'
+];
+
+// Conversational synonyms and equivalence terms so natural phrasing is fairly evaluated
+const CONVERSATIONAL_SYNONYMS: Record<string, string[]> = {
+  narrative: ['journey', 'story', 'background', 'progression', 'education', 'path', 'studies', 'started', 'overview'],
+  chronological: ['started', 'journey', 'initially', 'began', 'college', 'degree', 'timeline', 'path', 'completed', 'b.tech', 'bachelor'],
+  thematic: ['focused', 'focus', 'specialized', 'area', 'domain', 'passionate', 'interests', 'aims'],
+  milestones: ['milestone', 'project', 'projects', 'achievements', 'built', 'developed', 'work', 'journey', 'created'],
+  trajectory: ['goal', 'role', 'career', 'aim', 'future', 'aspirations', 'direction', 'looking', 'opportunity', 'team', 'position'],
+  internships: ['intern', 'internship', 'experience', 'work', 'project', 'projects', 'company', 'industry', 'responsibilities'],
+  internship: ['intern', 'internships', 'experience', 'work', 'project', 'projects', 'company', 'industry', 'responsibilities'],
+  technologies: ['tech', 'stack', 'tools', 'languages', 'frameworks', 'systems', 'backend', 'frontend', 'database', 'node', 'redis', 'react', 'python', 'sql', 'architectures'],
+  growth: ['learning', 'development', 'skills', 'progress', 'improved', 'grown', 'journey', 'career', 'goals'],
+  architecture: ['system', 'systems', 'design', 'pipeline', 'infrastructure', 'backend', 'service', 'services', 'processing', 'architectures'],
+  leadership: ['initiative', 'led', 'owned', 'guided', 'mentored', 'facilitated', 'drove', 'headed'],
+  capstone: ['project', 'final', 'thesis', 'application', 'system', 'task', 'developed'],
+  weakness: ['improvement', 'challenge', 'struggled', 'development', 'growth', 'tendency', 'learning curve', 'work on', 'improve'],
+  strength: ['proficient', 'expertise', 'good at', 'excel', 'strong', 'ability', 'capability', 'structured', 'strengths'],
+  conflict: ['disagreement', 'divergence', 'differing', 'friction', 'debate', 'differed', 'difference'],
+  resolution: ['resolved', 'solution', 'solved', 'compromise', 'aligned', 'consensus', 'agreement'],
+  result: ['outcome', 'impact', 'achieved', 'delivered', 'reduced', 'improved', 'saved', 'results', 'reliability'],
+  action: ['implemented', 'built', 'designed', 'created', 'developed', 'benchmarked', 'facilitated', 'coded', 'took'],
+  task: ['objective', 'goal', 'responsibility', 'target', 'problem', 'deliverable'],
+  situation: ['context', 'project', 'sprint', 'scenario', 'environment', 'during', 'when'],
+  contribution: ['responsibility', 'role', 'ownership', 'built', 'worked', 'developed', 'architected', 'implemented', 'handled', 'focused'],
+  individual: ['personal', 'solely', 'independently', 'personally', 'solo', 'myself'],
+  metrics: ['throughput', 'percentage', 'latency', 'seconds', 'ms', 'rate', 'numbers', 'qps', 'rpm', 'reliability', 'speed', 'minutes', 'hours'],
+  quantifiable: ['percentage', 'throughput', 'reduced', 'increased', 'stabilized', 'numbers', '%', 'latency', 'reliability'],
+  challenges: ['contention', 'obstacle', 'bottleneck', 'issue', 'problem', 'difficulty', 'bugs', 'bursts', 'pressure', 'failure'],
+  challenge: ['contention', 'obstacle', 'bottleneck', 'issue', 'problem', 'difficulty', 'bug', 'burst', 'pressure', 'failure'],
+  solved: ['resolved', 'eliminated', 'fixed', 'addressed', 'stabilized', 'optimized', 'mitigated', 'overcame'],
+  reduced: ['decreased', 'lowered', 'slashed', 'dropped', 'eliminated', 'stabilized', 'cut'],
+  latency: ['delay', 'throughput', 'speed', 'response time', 'performance', 'duration'],
+  design: ['architecting', 'architecture', 'schema', 'pipeline', 'structure', 'engine'],
+  effort: ['work', 'tasks', 'implementation', 'development', 'sprint'],
+  obstacle: ['contention', 'bottleneck', 'difficulty', 'issue', 'problem', 'challenge', 'bursts'],
+  tradeoffs: ['balance', 'trade-off', 'tradeoff', 'evaluation', 'benchmark', 'comparison'],
+};
+
+/**
+ * Preprocesses candidate answer text: strips excess spaces, tokenizes sentences and words.
+ */
+export function preprocessAnswerText(rawText: string): {
+  cleanText: string;
+  words: string[];
+  sentences: string[];
+} {
+  const cleanText = rawText.replace(/\s+/g, ' ').trim();
+  const words = cleanText.toLowerCase().split(/[^a-zA-Z0-9']+/).filter(Boolean);
+  const sentences = cleanText.split(/[.!?]+/).map((s) => s.trim()).filter(Boolean);
+  return { cleanText, words, sentences };
+}
+
+/**
+ * Analyzes communication indicators: speech duration, WPM speaking pace, filler words, and clarity.
+ */
+export function analyzeCommunicationMetrics(
+  cleanText: string,
+  words: string[],
+  durationSeconds: number
+): CommunicationMetrics {
+  const totalWords = words.length;
+  const effectiveDuration = Math.max(1, durationSeconds);
+  const wordsPerMinute = Math.round((totalWords / effectiveDuration) * 60);
+
+  // Detect filler words
+  const lower = cleanText.toLowerCase();
+  const fillerWordMap: Record<string, number> = {};
+  let totalFillers = 0;
+
+  for (const filler of FILLER_WORDS) {
+    const regex = new RegExp(`\\b${filler}\\b`, 'gi');
+    const matches = lower.match(regex);
+    if (matches && matches.length > 0) {
+      fillerWordMap[filler] = matches.length;
+      totalFillers += matches.length;
+    }
+  }
+
+  const fillerWordsList = Object.entries(fillerWordMap).map(([word, count]) => ({ word, count }));
+
+  // Check repetition & redundancy (distinct words ratio)
+  const uniqueWords = new Set(words);
+  const redundancyRatio = totalWords > 15 ? 1 - uniqueWords.size / totalWords : 0;
+  const redundancyCount = Math.round(redundancyRatio * totalWords);
+
+  // Calculate sentence clarity score (0-100)
+  // Supportive calibration: nervousness or verbal fillers provide coaching tips without penalizing content validity
+  let clarityBase = 88;
+  if (totalFillers > 6) clarityBase -= Math.min(15, (totalFillers - 6) * 2);
+  if (wordsPerMinute > 185) clarityBase -= 6; // Speaking too fast
+  if (wordsPerMinute < 85 && totalWords > 20) clarityBase -= 8; // Speaking too slow
+  if (totalWords < 20) clarityBase -= 12; // Very brief
+  const sentenceClarityScore = Math.max(50, Math.min(98, clarityBase));
+
+  // Coaching tips
+  const coachingTips: string[] = [];
+  if (totalFillers > 4) {
+    coachingTips.push(`Noticeable filler words detected (${totalFillers} instances). Practice taking a silent 1-second pause instead of using verbal crutches like "${fillerWordsList[0]?.word}". Pausing briefly to gather your thoughts is natural and demonstrates composure.`);
+  }
+  if (wordsPerMinute > 180) {
+    coachingTips.push(`Your speaking pace (~${wordsPerMinute} WPM) is on the faster side. Slowing down slightly to 130–150 WPM will help the interviewer absorb complex details easily.`);
+  } else if (wordsPerMinute < 95 && totalWords >= 25) {
+    coachingTips.push(`Your delivery pace (~${wordsPerMinute} WPM) is somewhat hesitant. Rehearsing your core technical milestones will help your delivery flow more continuously.`);
+  } else {
+    coachingTips.push(`Pacing is well-controlled (~${wordsPerMinute} WPM). Your delivery tempo sounded natural and professional.`);
+  }
+
+  if (totalWords < 30) {
+    coachingTips.push(`Your answer was relatively brief (${totalWords} words). Elaborate further with concrete examples or quantifiable outcomes.`);
+  }
+
+  return {
+    totalWords,
+    durationSeconds,
+    wordsPerMinute,
+    fillerWordsCount: totalFillers,
+    fillerWordsList,
+    redundancyCount,
+    sentenceClarityScore,
+    coachingTips,
+  };
+}
+
+/**
+ * Analyzes whether a behavioral answer conforms to the STAR framework:
+ * S - Situation, T - Task, A - Action, R - Result.
+ */
+export function analyzeSTARFramework(cleanText: string, sentences: string[]): STARAnalysis {
+  const lower = cleanText.toLowerCase();
+
+  // 1. Situation indicators
+  const situationKeywords = [
+    'when i was', 'during my', 'in our', 'at the time', 'last semester',
+    'project was', 'we were building', 'the context was', 'faced a scenario',
+    'while working on', 'challenge began when', 'our team had', 'our team faced',
+    'faced a critical', 'team faced'
+  ];
+  const situationRegex = /\b(during my|when i was|in our|at the time|project was|we were|faced a|while working|our team|team faced|in my previous|at apex|at my internship)\b/i;
+  const hasSituation = situationKeywords.some((kw) => lower.includes(kw)) || situationRegex.test(lower);
+  const situationSentence = sentences.find((s) => situationKeywords.some((kw) => s.toLowerCase().includes(kw)) || situationRegex.test(s));
+
+  // 2. Task indicators
+  const taskKeywords = [
+    'my task was', 'my responsibility was', 'i was assigned', 'needed to',
+    'goal was to', 'had to deliver', 'requirement was', 'objective was',
+    'i needed to', 'had to resolve', 'was tasked with', 'my goal was', 'my objective was'
+  ];
+  const taskRegex = /\b(my task|my responsibility|my objective|my goal|was to|objective was|goal was|needed to|had to|tasked with|assigned to)\b/i;
+  const hasTask = taskKeywords.some((kw) => lower.includes(kw)) || taskRegex.test(lower);
+  const taskSentence = sentences.find((s) => taskKeywords.some((kw) => s.toLowerCase().includes(kw)) || taskRegex.test(s));
+
+  // 3. Action indicators
+  const actionKeywords = [
+    'took initiative', 'took the initiative', 'i implemented', 'i designed', 'i organized',
+    'i researched', 'i proposed', 'i benchmarked', 'i refactored', 'i led',
+    'i communicated', 'i decided to', 'i developed', 'i built', 'i resolved',
+    'i took initiative', 'i ran', 'i profiled', 'i facilitated', 'i documented'
+  ];
+  const actionRegex = /\b(took initiative|took the initiative|i (took|ran|profiled|benchmarked|implemented|designed|built|created|developed|refactored|facilitated|documented|tested|led|decided|coordinated|organized|analyzed|configured|migrated))\b/i;
+  const hasAction = actionKeywords.some((kw) => lower.includes(kw)) || actionRegex.test(lower);
+  const actionSentence = sentences.find((s) => actionKeywords.some((kw) => s.toLowerCase().includes(kw)) || actionRegex.test(s));
+
+  // 4. Result indicators
+  const resultKeywords = [
+    'as a result', 'in the end', 'outcome was', 'successfully delivered',
+    'achieved', 'improved by', 'reduced latency', 'increased performance',
+    'learned that', 'finished on time', 'placed in top', 'positive feedback',
+    'prevented the issue', 'measurable result', 'the takeaway was', 'slashed', 'saved'
+  ];
+  const resultRegex = /\b(as a result|in the end|outcome was|successfully|achieved|improved by|reduced|slashed|increased|saved|delivered|finished on time|takeaway was)\b/i;
+  const hasResult = resultKeywords.some((kw) => lower.includes(kw)) || resultRegex.test(lower);
+  const resultSentence = sentences.find((s) => resultKeywords.some((kw) => s.toLowerCase().includes(kw)) || resultRegex.test(s));
+
+  const componentsCount = (hasSituation ? 1 : 0) + (hasTask ? 1 : 0) + (hasAction ? 1 : 0) + (hasResult ? 1 : 0);
+  const starScore = Math.min(100, Math.round((componentsCount / 4) * 100));
+
+  let feedback = '';
+  if (componentsCount === 4) {
+    feedback = 'Excellent STAR response! You clearly structured Situation, Task, Action, and the final Result.';
+  } else if (componentsCount === 3) {
+    const missing = !hasSituation ? 'Situation' : !hasTask ? 'Task' : !hasAction ? 'Action' : 'quantifiable Result';
+    feedback = `Solid structure! Adding a clearer ${missing} would make this answer completely comprehensive.`;
+  } else {
+    feedback = 'Consider structuring situational responses with the STAR method (Situation → Task → Action → Result) for maximum clarity and impact.';
+  }
+
+  return {
+    hasSituation,
+    situationSnippet: situationSentence,
+    hasTask,
+    taskSnippet: taskSentence,
+    hasAction,
+    actionSnippet: actionSentence,
+    hasResult,
+    resultSnippet: resultSentence,
+    starScore,
+    feedback,
+  };
+}
+
+/**
+ * Extracts candidate entities (projects, tools, teammates, milestones) from speech
+ * to synthesize a genuine context-aware follow-up question.
+ */
+export function generateContextualFollowUp(
+  question: HRDatasetQuestion,
+  cleanText: string,
+  words: string[],
+  overallScore: number
+): { followUp: string; nextAction: 'ask_follow_up' | 'next_question' | 'deep_dive' | 'encourage_and_move_on' } {
+  // If answer was very short or struggling
+  if (words.length < 25) {
+    return {
+      followUp: `Thank you for sharing that starting point. Could you expand a little further with a specific example or scenario that illustrates your point?`,
+      nextAction: 'encourage_and_move_on',
+    };
+  }
+
+  // Scan for mentioned entities in candidate's text
+  const entityMatches: string[] = [];
+  const candidateMentions = [
+    'redis', 'docker', 'postgresql', 'mongodb', 'react', 'node', 'python',
+    'etabs', 'autocad', 'solidworks', 'ansys', 'verilog', 'kicad', 'pytorch',
+    'spark', 'kafka', 'api', 'database', 'hackathon', 'capstone', 'internship',
+    'backend', 'frontend', 'cloud', 'architecture', 'teammate', 'benchmark'
+  ];
+
+  for (const m of candidateMentions) {
+    if (cleanText.toLowerCase().includes(m)) {
+      entityMatches.push(m.charAt(0).toUpperCase() + m.slice(1));
+    }
+  }
+
+  // If candidate mentioned specific technical tools/projects
+  if (entityMatches.length > 0 && question.followUpTemplates.length > 0) {
+    const topEntity = entityMatches[0];
+    const template = question.followUpTemplates[0];
+    const customized = template.replace('{detected_entity}', topEntity);
+    return {
+      followUp: customized,
+      nextAction: overallScore >= 80 ? 'deep_dive' : 'ask_follow_up',
+    };
+  }
+
+  // If template is available
+  if (question.followUpTemplates.length > 0) {
+    return {
+      followUp: question.followUpTemplates[0].replace('{detected_entity}', 'that approach'),
+      nextAction: overallScore >= 80 ? 'deep_dive' : 'ask_follow_up',
+    };
+  }
+
+  // Generic fallback if strong answer
+  if (overallScore >= 85) {
+    return {
+      followUp: `That was a very clear breakdown. If you had to scale that solution or explain it to a non-technical executive, how would you summarize the core value?`,
+      nextAction: 'deep_dive',
+    };
+  }
+
+  return {
+    followUp: `Thank you, that clarifies your perspective well. Let's proceed to the next question.`,
+    nextAction: 'next_question',
+  };
+}
+
+/**
+ * Generates structured, resume-grounded feedback, sentence-by-sentence highlighted issues,
+ * off-topic detection, mistake identification, and professional suggested answers.
+ */
+export function generateResumeBasedFeedback(
+  question: HRDatasetQuestion,
+  userAnswerText: string,
+  commMetrics: CommunicationMetrics,
+  starAnalysis: STARAnalysis | undefined,
+  conceptCoverage: { concept: string; covered: boolean }[],
+  parsedResume?: ParsedResume | null
+): ResumeBasedFeedback {
+  const cleanAnswer = userAnswerText.trim();
+  const sentences = cleanAnswer
+    ? cleanAnswer.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const candidateName = parsedResume?.fullName || 'Candidate';
+  const candidateDept = parsedResume?.department || 'Engineering';
+  const candidateCollege = parsedResume?.education?.[0]?.college || 'University';
+  const primaryProject = parsedResume?.projects?.[0];
+  const primarySkills = parsedResume?.rawSkillsList && parsedResume.rawSkillsList.length > 0
+    ? parsedResume.rawSkillsList
+    : ['Problem Solving', 'Communication', 'Technical Design'];
+
+  const whatDidWell: string[] = [];
+  const whatIsMissing: string[] = [];
+  const offTopicAnalysis: { snippet: string; explanation: string }[] = [];
+  const mistakesIdentified: { statement: string; issue: string; correctedExample: string }[] = [];
+  const howToImproveWithResume: string[] = [];
+  const highlightedIssues: HighlightedIssue[] = [];
+
+  const questionKeywords = question.keywords.map((k) => k.toLowerCase());
+  const questionConcepts = question.expectedConcepts.map((c) => c.toLowerCase());
+  const resumeKeywords = [
+    ...primarySkills.map((s) => s.toLowerCase()),
+    ...(primaryProject ? [primaryProject.title.toLowerCase(), ...primaryProject.technologies.map((t) => t.toLowerCase())] : []),
+    candidateDept.toLowerCase(),
+    candidateCollege.toLowerCase(),
+    'team', 'project', 'work', 'experience', 'build', 'solved', 'learned', 'contributed', 'collaborated'
+  ];
+
+  // 1. Analyze Each Sentence in Candidate Answer
+  if (sentences.length === 0) {
+    highlightedIssues.push({
+      text: '(No verbal response detected)',
+      label: 'Needs improvement',
+      reason: 'No response was provided for this question.',
+      correctedExample: 'Speak or type your answer clearly before submitting.',
+    });
+  } else {
+    sentences.forEach((sentence) => {
+      const lowerSentence = sentence.toLowerCase();
+      const sentenceWords = lowerSentence.split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+
+      // Check if off-topic
+      const hasQuestionKeyword = questionKeywords.some((kw) => {
+        if (lowerSentence.includes(kw)) return true;
+        const syns = CONVERSATIONAL_SYNONYMS[kw] || [];
+        return syns.some((s) => lowerSentence.includes(s));
+      });
+      const hasConceptOverlap = questionConcepts.some((qc) => {
+        const tokens = qc.split(/\s+/).filter((t) => t.length > 3);
+        return tokens.some((t) => {
+          if (lowerSentence.includes(t)) return true;
+          const syns = CONVERSATIONAL_SYNONYMS[t] || [];
+          return syns.some((s) => lowerSentence.includes(s));
+        });
+      });
+      const hasResumeOverlap = resumeKeywords.some((rk) => lowerSentence.includes(rk));
+      const hasGeneralHRTerms = /\b(role|task|goal|objective|responsibilit|learn|strength|weakness|skill|challenge|obstacle|result|impact|achiev|internship|college|career|problem|solut|improv|collaborat|deliver)\b/i.test(lowerSentence);
+
+      const isSentenceOnTopic = hasQuestionKeyword || hasConceptOverlap || hasResumeOverlap || (hasGeneralHRTerms && sentenceWords.length > 3);
+
+      if (!isSentenceOnTopic && sentenceWords.length >= 4) {
+        const offTopicObj = {
+          snippet: sentence,
+          explanation: `This statement shifts away from "${question.question}". Recruiters focus on role-relevant experience rather than unrelated subjects.`,
+        };
+        offTopicAnalysis.push(offTopicObj);
+        highlightedIssues.push({
+          text: sentence,
+          label: 'Off-topic',
+          reason: 'Unrelated to the question topic; distracting from your core qualifications.',
+          correctedExample: 'Directly address the question topic using relevant examples from your background.',
+        });
+        return;
+      }
+
+      // Check for mistakes: vague claims, excessive fillers
+      const fillerMatches = FILLER_WORDS.filter((f) => new RegExp(`\\b${f}\\b`, 'i').test(lowerSentence));
+      const isVague = /\b(stuff|things|did some work|it was okay|you know what i mean|kind of good|somehow worked)\b/i.test(lowerSentence);
+
+      if (isVague) {
+        const mistakeObj = {
+          statement: sentence,
+          issue: 'Vague formulation lacks concrete technical ownership and precise engineering vocabulary.',
+          correctedExample: 'Replace vague terms with specific actions, tools, and quantified metrics.',
+        };
+        mistakesIdentified.push(mistakeObj);
+        highlightedIssues.push({
+          text: sentence,
+          label: 'Needs improvement',
+          reason: 'Phrasing is overly casual or indistinct; specify the tools and actions you used.',
+          correctedExample: 'Specify the exact methodology, architecture, or tools employed.',
+        });
+      } else if (fillerMatches.length >= 2) {
+        const cleaned = sentence.replace(/\b(basically|you know|sort of|kind of|literally|actually)\b/gi, '').replace(/\s+/g, ' ').trim();
+        const mistakeObj = {
+          statement: sentence,
+          issue: `Contains multiple filler words ("${fillerMatches.join('", "')}"), which diminish verbal authority and poise.`,
+          correctedExample: cleaned || sentence,
+        };
+        mistakesIdentified.push(mistakeObj);
+        highlightedIssues.push({
+          text: sentence,
+          label: 'Needs improvement',
+          reason: `Noticeable filler words (${fillerMatches.join(', ')}). Replacing fillers with brief silent pauses projects higher confidence.`,
+          correctedExample: mistakeObj.correctedExample,
+        });
+      } else if (hasQuestionKeyword || hasConceptOverlap || (starAnalysis && (lowerSentence.includes('because') || lowerSentence.includes('result') || lowerSentence.includes('i ')))) {
+        highlightedIssues.push({
+          text: sentence,
+          label: 'Correct',
+          reason: 'Directly addresses the question criteria with clear, relevant focus.',
+        });
+      } else {
+        highlightedIssues.push({
+          text: sentence,
+          label: 'Correct',
+          reason: 'Contributes constructive supporting context to your response.',
+        });
+      }
+    });
+  }
+
+  // 2. Identify What Is Missing
+  const missingConcepts = conceptCoverage.filter((c) => !c.covered);
+  missingConcepts.forEach((mc) => {
+    whatIsMissing.push(`Missing coverage of "${mc.concept}": expand on this to satisfy core recruiter expectations.`);
+    highlightedIssues.push({
+      text: `Missing: ${mc.concept}`,
+      label: 'Missing from your answer',
+      reason: `Recruiters specifically evaluate "${mc.concept}" for this interview question.`,
+      correctedExample: `Explicitly articulate how you handled ${mc.concept.toLowerCase()}.`,
+    });
+  });
+
+  if (question.starFrameworkApplicable && starAnalysis) {
+    if (!starAnalysis.hasResult) {
+      whatIsMissing.push('Missing quantifiable Result or lessons learned: always conclude your behavioral story with the outcome.');
+      highlightedIssues.push({
+        text: 'Missing: Measurable Result / Outcome',
+        label: 'Missing from your answer',
+        reason: 'Behavioral answers require a quantifiable outcome or impact to validate your actions.',
+        correctedExample: 'As a result, our team reduced turnaround time by 35% and received commendation from our lead.',
+      });
+    }
+    if (!starAnalysis.hasAction) {
+      whatIsMissing.push('Missing specific individual Action: clarify your personal contribution rather than only speaking as "we".');
+      highlightedIssues.push({
+        text: 'Missing: Specific Personal Actions',
+        label: 'Missing from your answer',
+        reason: 'Interviewer wants to evaluate what YOU specifically designed, implemented, or resolved.',
+        correctedExample: 'I took ownership of researching the trade-offs and wrote the core automation script.',
+      });
+    }
+  }
+
+  // 3. Identify What Was Done Well
+  const coveredConcepts = conceptCoverage.filter((c) => c.covered);
+  if (coveredConcepts.length > 0) {
+    whatDidWell.push(`Effectively addressed key competencies: ${coveredConcepts.map((c) => `"${c.concept}"`).slice(0, 3).join(', ')}.`);
+  }
+  if (starAnalysis?.hasSituation) {
+    whatDidWell.push('Clearly established the context and initial scenario for the interviewer.');
+  }
+  if (starAnalysis?.hasAction) {
+    whatDidWell.push('Demonstrated personal accountability by describing concrete actions taken.');
+  }
+  if (starAnalysis?.hasResult) {
+    whatDidWell.push('Included outcomes that substantiate the effectiveness of your solution.');
+  }
+  if (commMetrics.wordsPerMinute >= 105 && commMetrics.wordsPerMinute <= 165) {
+    whatDidWell.push(`Well-calibrated conversational pace (~${commMetrics.wordsPerMinute} WPM), making your response pleasant and easy to follow.`);
+  }
+  if (commMetrics.fillerWordsCount <= 1 && cleanAnswer.length > 40) {
+    whatDidWell.push('Clean verbal delivery with minimal filler words, projecting confidence and composure.');
+  }
+  if (whatDidWell.length === 0) {
+    whatDidWell.push('Initiated a foundation for this HR response that can be refined with specific examples.');
+  }
+
+  // 4. How to Improve with Actual Resume
+  if (primaryProject) {
+    howToImproveWithResume.push(
+      `Leverage your actual project "${primaryProject.title}": explain how you applied ${primaryProject.technologies.slice(0, 3).join(', ')} to overcome real technical challenges.`
+    );
+  }
+  if (parsedResume?.experience && parsedResume.experience.length > 0) {
+    const exp = parsedResume.experience[0];
+    howToImproveWithResume.push(
+      `Draw from your experience as ${exp.role} at ${exp.company} to demonstrate professional teamwork and deadline management.`
+    );
+  }
+  if (parsedResume?.education && parsedResume.education.length > 0) {
+    howToImproveWithResume.push(
+      `Frame your academic progression in ${candidateDept} at ${candidateCollege} to highlight your structured fundamentals.`
+    );
+  }
+  if (primarySkills.length > 0) {
+    howToImproveWithResume.push(
+      `Reference your verified skills (${primarySkills.slice(0, 4).join(', ')}) as concrete tools in your problem-solving process.`
+    );
+  }
+  howToImproveWithResume.push(
+    'Structure your delivery using the STAR framework: 20 seconds on Situation/Task, 50 seconds on your Actions, and 20 seconds on the Result.'
+  );
+
+  // 5. Generate Professional Suggested Answer Tailored to Resume
+  let suggestedAnswerUsingResume = '';
+
+  if (question.category === 'self_introduction') {
+    const projectMention = primaryProject
+      ? `Most recently, I engineered "${primaryProject.title}" utilizing ${primaryProject.technologies.slice(0, 3).join(', ')}, where I tackled complex data flow challenges.`
+      : `Throughout my projects, I have specialized in ${primarySkills.slice(0, 3).join(', ')}.`;
+
+    suggestedAnswerUsingResume = `Hello, I'm ${candidateName}. I graduated with a degree in ${candidateDept} from ${candidateCollege}. Over the course of my engineering journey, I developed a strong passion for building robust software solutions. ${projectMention} I thrive in collaborative environments where I can tackle demanding engineering challenges, and I am eager to contribute my skills to your team.`;
+  } else if (question.category === 'project_contribution' && primaryProject) {
+    suggestedAnswerUsingResume = `In my resume, I highlighted my project "${primaryProject.title}". Our goal was to ${primaryProject.description || 'deliver a scalable solution'}. My individual responsibility centered on architecting the core modules using ${primaryProject.technologies.slice(0, 3).join(', ')}. A pivotal technical obstacle we solved was optimizing throughput under load; by implementing modular caching and streamlined queries, we achieved smooth execution. This project taught me the importance of proactive benchmarking and clean system design.`;
+  } else if (question.category === 'teamwork_conflict' || question.category === 'leadership_problem_solving') {
+    const projTitle = primaryProject ? `our "${primaryProject.title}" project` : 'a critical engineering sprint';
+    suggestedAnswerUsingResume = `During ${projTitle}, our team reached a divergence in opinion regarding the architecture to adopt. Instead of letting differences cause delays, I proposed an objective benchmark using ${primarySkills.slice(0, 2).join(' and ')} to evaluate latency and maintenance overhead. I consolidated our empirical findings into an accessible comparison doc and hosted a brief sync. This data-driven approach enabled the entire team to align cohesively, delivering the milestone 2 days ahead of schedule.`;
+  } else if (question.category === 'strengths_weaknesses') {
+    suggestedAnswerUsingResume = `My greatest technical strength is rapid diagnostic problem-solving—as demonstrated in my work with ${primarySkills.slice(0, 2).join(' and ')}, where I methodically break down complex bottlenecks into testable parts. An area I actively work to improve is delegating tasks earlier; in past sprints, I tended to handle multiple subtasks personally. I have adopted structured task-tracking and regular stand-up updates to distribute workload and collaborate more smoothly.`;
+  } else if (question.category === 'why_hire_you' || question.category === 'why_this_role') {
+    suggestedAnswerUsingResume = `You should hire me because I combine rigorous foundational knowledge in ${candidateDept} from ${candidateCollege} with practical implementation skills in ${primarySkills.slice(0, 3).join(', ')}. In projects like "${primaryProject?.title || 'my capstone'}", I demonstrated not just coding capability, but the ownership required to carry a product from design to reliable deployment. I am excited to bring this dedication and continuous learning mindset to your team.`;
+  } else if (question.category === 'ethics_professional_behavior') {
+    suggestedAnswerUsingResume = `In an engineering project, ethical integrity and software reliability are paramount. If asked to deploy code with known security vulnerabilities to meet a tight deadline, I would document the exact exposure with empirical test results, communicate transparently with stakeholders, and propose a phased mitigation plan. Protecting user trust is always non-negotiable.`;
+  } else if (question.category === 'motivation_company_fit') {
+    suggestedAnswerUsingResume = `What motivates me most is having end-to-end ownership on engineering systems that solve real-world problems. With my background in ${candidateDept} and hands-on experience in ${primarySkills.slice(0, 3).join(', ')}, I am drawn to your culture because you prioritize engineering craftsmanship, peer code reviews, and continuous learning. I thrive in teams where engineers are encouraged to ask thoughtful questions and take initiative.`;
+  } else if (question.category === 'future_goals_learning' || question.category === 'career_goals') {
+    suggestedAnswerUsingResume = `Over the next two to three years, my goal is to evolve into a versatile engineer capable of architecting resilient distributed systems. Building on my foundation in ${primarySkills.slice(0, 3).join(', ')}, I am actively exploring advanced systems design and cloud infrastructure. Longer term, I aim to mentor junior developers and lead technical initiatives that deliver measurable business impact.`;
+  } else if (question.category === 'time_management') {
+    suggestedAnswerUsingResume = `When balancing concurrent project deadlines, I rely on rigorous prioritization using agile timeboxing. During a semester where I had to deliver our "${primaryProject?.title || 'capstone'}" project alongside exams, I broke our roadmap into modular milestones, conducted daily 5-minute personal stand-ups, and proactively communicated progress. This disciplined approach enabled me to deliver our project on time without sacrificing code quality.`;
+  } else if (question.category === 'handling_failure') {
+    suggestedAnswerUsingResume = `During an earlier iteration of our "${primaryProject?.title || 'capstone'}" project, a query optimization I implemented underperformed under concurrent load during our stress tests. Instead of hiding the setback, I immediately flagged the regression to my team, conducted a blameless post-mortem using execution profiling, and identified the missing index. We resolved the bottleneck within 24 hours, and that experience taught me the critical value of rigorous stress-testing before shipping.`;
+  } else {
+    suggestedAnswerUsingResume = question.exampleStrongAnswer || 'I approach challenges methodically by first diagnosing constraints, coordinating openly with team members, and delivering measurable results.';
+  }
+
+  return {
+    whatDidWell,
+    whatIsMissing,
+    offTopicAnalysis,
+    mistakesIdentified,
+    howToImproveWithResume,
+    highlightedIssues,
+    suggestedAnswerUsingResume,
+  };
+}
+
+/**
+ * Main evaluation pipeline for candidate HR response.
+ * Uses semantic scoring, concept coverage, STAR rubric, and communication telemetry.
+ */
+export async function evaluateHRAnswerLocally(
+  question: HRDatasetQuestion,
+  userAnswerText: string,
+  durationSeconds: number,
+  parsedResume?: ParsedResume | null
+): Promise<HREvaluationResult> {
+  const { cleanText, words, sentences } = preprocessAnswerText(userAnswerText);
+  const commMetrics = analyzeCommunicationMetrics(cleanText, words, durationSeconds);
+  const starAnalysis = question.starFrameworkApplicable ? analyzeSTARFramework(cleanText, sentences) : undefined;
+
+  // 1. Concept Coverage Check
+  const conceptCoverage = question.expectedConcepts.map((concept) => {
+    const conceptLower = concept.toLowerCase();
+    if (starAnalysis) {
+      if (conceptLower.startsWith('situation') && starAnalysis.hasSituation) {
+        return { concept, covered: true };
+      }
+      if (conceptLower.startsWith('task') && starAnalysis.hasTask) {
+        return { concept, covered: true };
+      }
+      if (conceptLower.startsWith('action') && starAnalysis.hasAction) {
+        return { concept, covered: true };
+      }
+      if (conceptLower.startsWith('result') && starAnalysis.hasResult) {
+        return { concept, covered: true };
+      }
+    }
+
+    const cleanTokens = conceptLower
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !['situation', 'task', 'action', 'result'].includes(w));
+
+    if (cleanTokens.length === 0) {
+      return { concept, covered: true };
+    }
+
+    const matches = cleanTokens.filter((token) => {
+      const stem = token.length > 5 ? token.slice(0, -2) : token;
+      const root5 = token.length >= 6 ? token.slice(0, 5) : '';
+      if (cleanText.toLowerCase().includes(token) || cleanText.toLowerCase().includes(stem) || (root5 && cleanText.toLowerCase().includes(root5))) {
+        return true;
+      }
+      const synonyms = CONVERSATIONAL_SYNONYMS[token] || [];
+      if (synonyms.some((syn) => cleanText.toLowerCase().includes(syn))) {
+        return true;
+      }
+      if (['metrics', 'quantifiable', 'speedup', 'accuracy'].includes(token) && /\b\d+([.,]\d+)?%?\b/.test(cleanText)) {
+        return true;
+      }
+      if (parsedResume) {
+        if (['project', 'projects', 'capstone', 'milestones', 'internship', 'internships'].includes(token)) {
+          const mentionedProj = parsedResume.projects?.some((p) =>
+            cleanText.toLowerCase().includes(p.title.toLowerCase()) ||
+            p.technologies?.some((t) => cleanText.toLowerCase().includes(t.toLowerCase()))
+          );
+          if (mentionedProj) return true;
+        }
+        if (['skill', 'skills', 'technologies', 'tools'].includes(token)) {
+          const mentionedSkill = parsedResume.rawSkillsList?.some((s) => cleanText.toLowerCase().includes(s.toLowerCase()));
+          if (mentionedSkill) return true;
+        }
+        if (['education', 'college', 'university', 'degree', 'narrative', 'chronological'].includes(token)) {
+          const mentionedEdu = parsedResume.education?.some((e) =>
+            cleanText.toLowerCase().includes(e.college.toLowerCase()) ||
+            cleanText.toLowerCase().includes(e.degree.toLowerCase()) ||
+            cleanText.toLowerCase().includes(e.branch.toLowerCase())
+          );
+          if (mentionedEdu) return true;
+        }
+      }
+      return false;
+    });
+
+    const isCovered = matches.length >= Math.max(1, Math.floor(cleanTokens.length * 0.35));
+    return { concept, covered: isCovered };
+  });
+
+  const coveredCount = conceptCoverage.filter((c) => c.covered).length;
+  const coverageRatio = conceptCoverage.length > 0 ? coveredCount / conceptCoverage.length : 0.8;
+  const completenessScore = Math.min(100, Math.round(coverageRatio * 100));
+
+  // 2. Relevance Score (keyword overlap + concept matching + STAR alignment)
+  const keywordMatches = question.keywords.filter((kw) => {
+    const kwLower = kw.toLowerCase();
+    const stem = kwLower.length > 5 ? kwLower.slice(0, -2) : kwLower;
+    if (cleanText.toLowerCase().includes(kwLower) || cleanText.toLowerCase().includes(stem)) {
+      return true;
+    }
+    const synonyms = CONVERSATIONAL_SYNONYMS[kwLower] || [];
+    if (synonyms.some((syn) => cleanText.toLowerCase().includes(syn))) {
+      return true;
+    }
+    if (parsedResume) {
+      if (['capstone', 'milestones'].includes(kwLower)) {
+        const hasProj = parsedResume.projects?.some((p) => cleanText.toLowerCase().includes(p.title.toLowerCase()));
+        if (hasProj) return true;
+      }
+      if (['technologies', 'skills'].includes(kwLower)) {
+        const hasSkill = parsedResume.rawSkillsList?.some((s) => cleanText.toLowerCase().includes(s.toLowerCase()));
+        if (hasSkill) return true;
+      }
+    }
+    return false;
+  });
+  const keywordRatio = question.keywords.length > 0 ? keywordMatches.length / question.keywords.length : 0.5;
+
+  let effectiveRelevance = keywordRatio * 0.4 + coverageRatio * 0.6;
+  if (starAnalysis) {
+    const starRatio = starAnalysis.starScore / 100;
+    effectiveRelevance = effectiveRelevance * 0.5 + starRatio * 0.5;
+  }
+  const relevanceScore = Math.min(98, Math.max(35, Math.round(effectiveRelevance * 100)));
+
+  // 3. Quality & Structure Score
+  let qualityBase = Math.round(relevanceScore * 0.45 + completenessScore * 0.35 + commMetrics.sentenceClarityScore * 0.2);
+  if (starAnalysis) {
+    qualityBase = Math.round(qualityBase * 0.65 + starAnalysis.starScore * 0.35);
+  }
+  const qualityScore = Math.min(96, Math.max(35, qualityBase));
+  const structureScore = starAnalysis ? starAnalysis.starScore : commMetrics.sentenceClarityScore;
+
+  // 4. Overall Weighted Score
+  const r = question.rubric;
+  const overallScore = Math.min(
+    98,
+    Math.max(
+      30,
+      Math.round(
+        relevanceScore * r.relevanceWeight +
+        completenessScore * r.completenessWeight +
+        commMetrics.sentenceClarityScore * r.clarityWeight +
+        structureScore * r.evidenceWeight
+      )
+    )
+  );
+
+  // 5. Rating Band
+  let ratingBand: 'Exceptional' | 'Strong Answer' | 'Satisfactory' | 'Needs Improvement' = 'Satisfactory';
+  if (overallScore >= 88) ratingBand = 'Exceptional';
+  else if (overallScore >= 75) ratingBand = 'Strong Answer';
+  else if (overallScore >= 55) ratingBand = 'Satisfactory';
+  else ratingBand = 'Needs Improvement';
+
+  // 6. Strengths and Areas to Improve
+  const strengths: string[] = [];
+  const areasToImprove: string[] = [];
+
+  if (relevanceScore >= 75) {
+    strengths.push('Directly addressed the core intent of the question.');
+  }
+  if (coveredCount >= 2) {
+    strengths.push(`Addressed key concepts including ${conceptCoverage.filter((c) => c.covered).map((c) => `"${c.concept}"`).slice(0, 2).join(' and ')}.`);
+  }
+  if (starAnalysis && starAnalysis.hasAction) {
+    strengths.push('Clearly articulated individual actions taken rather than speaking solely in abstract terms.');
+  }
+  if (commMetrics.wordsPerMinute >= 110 && commMetrics.wordsPerMinute <= 165) {
+    strengths.push('Delivery pacing was well-paced and articulate.');
+  }
+  if (strengths.length === 0) {
+    strengths.push('Provided a starting point that touched on your background.');
+  }
+
+  // Areas to improve
+  if (completenessScore < 65) {
+    const missing = conceptCoverage.find((c) => !c.covered);
+    if (missing) {
+      areasToImprove.push(`Elaborate further on ${missing.concept.toLowerCase()} to provide a more holistic answer.`);
+    }
+  }
+  if (starAnalysis && !starAnalysis.hasResult) {
+    areasToImprove.push('Conclude with the quantifiable result, impact, or key lessons learned from your experience.');
+  }
+  if (commMetrics.fillerWordsCount >= 4) {
+    areasToImprove.push(`Reduce filler words (${commMetrics.fillerWordsList.slice(0, 2).map((f) => `"${f.word}"`).join(', ')}) to project sharper confidence.`);
+  }
+  if (words.length < 35) {
+    areasToImprove.push('Answer was relatively short; aim for 60–90 words with specific examples from your projects or coursework.');
+  }
+  if (areasToImprove.length === 0) {
+    areasToImprove.push('Keep practicing concise, punchy summaries to make strong first impressions.');
+  }
+
+  // 7. Contextual Follow-Up Question
+  const { followUp, nextAction } = generateContextualFollowUp(question, cleanText, words, overallScore);
+
+  // 8. Explanation summary
+  const explanation = `Score calculated across relevance (${relevanceScore}%), concept coverage (${completenessScore}%), clarity (${commMetrics.sentenceClarityScore}%), and structure (${structureScore}%). ${
+    ratingBand === 'Exceptional' || ratingBand === 'Strong Answer'
+      ? 'Strong alignment with professional HR interview benchmarks.'
+      : 'Review the suggested answer to see how to incorporate more concrete evidence.'
+  }`;
+
+  // 9. Generate Detailed Resume-Based Feedback & Mistake Highlighting
+  const resumeFeedback = generateResumeBasedFeedback(
+    question,
+    cleanText,
+    commMetrics,
+    starAnalysis,
+    conceptCoverage,
+    parsedResume
+  );
+
+  return {
+    questionId: question.id,
+    questionText: question.question,
+    userAnswerText: cleanText,
+    relevanceScore,
+    qualityScore,
+    clarityScore: commMetrics.sentenceClarityScore,
+    structureScore,
+    overallScore,
+    completenessScore,
+    ratingBand,
+    conceptCoverage,
+    starAnalysis,
+    communicationMetrics: commMetrics,
+    strengths: resumeFeedback.whatDidWell.length > 0 ? resumeFeedback.whatDidWell : strengths,
+    areasToImprove: resumeFeedback.whatIsMissing.length > 0 ? resumeFeedback.whatIsMissing : areasToImprove,
+    suggestedImprovedAnswer: resumeFeedback.suggestedAnswerUsingResume || question.exampleStrongAnswer,
+    explanation,
+    followUpQuestion: followUp,
+    nextAction,
+    resumeFeedback,
+  };
+}
+
+/**
+ * Main evaluation entrypoint with dual-mode execution:
+ * Calls server API when available, falls back seamlessly to the client NLP pipeline.
+ */
+export async function evaluateHRAnswer(
+  question: HRDatasetQuestion,
+  userAnswerText: string,
+  durationSeconds: number,
+  parsedResume?: ParsedResume | null
+): Promise<HREvaluationResult> {
+  try {
+    const response = await fetch('/api/interview/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questionText: question.question,
+        candidateAnswer: userAnswerText,
+        roundType: 'hr',
+        difficulty: question.difficulty,
+        durationSeconds,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.evaluation) {
+        const local = await evaluateHRAnswerLocally(question, userAnswerText, durationSeconds, parsedResume);
+        const serverEval = data.evaluation;
+        return {
+          ...local,
+          relevanceScore: serverEval.relevanceScore || local.relevanceScore,
+          clarityScore: serverEval.communicationScore || local.clarityScore,
+          overallScore: Math.round(
+            ((serverEval.relevanceScore || local.relevanceScore) * 0.4) +
+            ((serverEval.communicationScore || local.clarityScore) * 0.3) +
+            (local.structureScore * 0.3)
+          ),
+          strengths: serverEval.strengths && serverEval.strengths.length > 0 ? serverEval.strengths : local.strengths,
+          areasToImprove: serverEval.improvements && serverEval.improvements.length > 0 ? serverEval.improvements : local.areasToImprove,
+          suggestedImprovedAnswer: serverEval.sampleIdealAnswer || local.suggestedImprovedAnswer,
+          followUpQuestion: serverEval.followUpQuestion || local.followUpQuestion,
+        };
+      }
+    }
+  } catch {
+    // Backend offline: seamless client-side NLP evaluation
+  }
+
+  return evaluateHRAnswerLocally(question, userAnswerText, durationSeconds, parsedResume);
+}

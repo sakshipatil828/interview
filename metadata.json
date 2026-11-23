@@ -1,0 +1,11 @@
+{
+  "name": "CareerCurve",
+  "description": "AI-Powered Interview Preparation Platform featuring dynamic resume parsing, technical and HR mock interviews, WebRTC video/audio telemetry, and aptitude evaluation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
