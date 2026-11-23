@@ -1325,6 +1325,7 @@ function generateFallbackQuestions(candidateProfile: any, roundType: string, dif
 
 export default defineConfig(() => {
   return {
+    base: '/interview/',
     plugins: [react(), tailwindcss(), expressApiPlugin()],
     resolve: {
       alias: {
